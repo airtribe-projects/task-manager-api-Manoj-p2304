@@ -7,29 +7,48 @@ app.use(express.urlencoded({ extended: true }));
 
 let tasks = require('./task.json').tasks;
 
-const isValidTask = (body) =>
-    typeof body?.title === 'string' &&
-    typeof body?.description === 'string' &&
-    typeof body?.completed === 'boolean';
+const validateTaskBody = (body) => {
+    if (!body || typeof body !== 'object') return 'Request body is required';
+    const { title, description, completed } = body;
+    if (typeof title !== 'string' || title.trim() === '') {
+        return 'title must be a non-empty string';
+    }
+    if (typeof description !== 'string' || description.trim() === '') {
+        return 'description must be a non-empty string';
+    }
+    if (typeof completed !== 'boolean') {
+        return 'completed must be a boolean';
+    }
+    return null;
+};
+
+const parseId = (raw) => {
+    const id = Number(raw);
+    return Number.isInteger(id) && id > 0 ? id : null;
+};
 
 app.get('/tasks', (req, res) => {
     res.status(200).json(tasks);
 });
 
 app.get('/tasks/:id', (req, res) => {
-    const task = tasks.find((t) => t.id === Number(req.params.id));
+    const id = parseId(req.params.id);
+    if (id === null) {
+        return res.status(404).json({ error: 'Task not found' });
+    }
+    const task = tasks.find((t) => t.id === id);
     if (!task) return res.status(404).json({ error: 'Task not found' });
     res.status(200).json(task);
 });
 
 app.post('/tasks', (req, res) => {
-    if (!isValidTask(req.body)) {
-        return res.status(400).json({ error: 'Invalid task payload' });
-    }
+    const error = validateTaskBody(req.body);
+    if (error) return res.status(400).json({ error });
+
     const newTask = {
         id: tasks.length ? Math.max(...tasks.map((t) => t.id)) + 1 : 1,
-        title: req.body.title,
-        description: req.body.description,
+        title: req.body.title.trim(),
+        description: req.body.description.trim(),
         completed: req.body.completed,
     };
     tasks.push(newTask);
@@ -37,20 +56,46 @@ app.post('/tasks', (req, res) => {
 });
 
 app.put('/tasks/:id', (req, res) => {
-    const idx = tasks.findIndex((t) => t.id === Number(req.params.id));
-    if (idx === -1) return res.status(404).json({ error: 'Task not found' });
-    if (!isValidTask(req.body)) {
-        return res.status(400).json({ error: 'Invalid task payload' });
+    const id = parseId(req.params.id);
+    if (id === null) {
+        return res.status(404).json({ error: 'Task not found' });
     }
-    tasks[idx] = { ...tasks[idx], ...req.body, id: tasks[idx].id };
+    const idx = tasks.findIndex((t) => t.id === id);
+    if (idx === -1) return res.status(404).json({ error: 'Task not found' });
+
+    const error = validateTaskBody(req.body);
+    if (error) return res.status(400).json({ error });
+
+    tasks[idx] = {
+        id: tasks[idx].id,
+        title: req.body.title.trim(),
+        description: req.body.description.trim(),
+        completed: req.body.completed,
+    };
     res.status(200).json(tasks[idx]);
 });
 
 app.delete('/tasks/:id', (req, res) => {
-    const idx = tasks.findIndex((t) => t.id === Number(req.params.id));
+    const id = parseId(req.params.id);
+    if (id === null) {
+        return res.status(404).json({ error: 'Task not found' });
+    }
+    const idx = tasks.findIndex((t) => t.id === id);
     if (idx === -1) return res.status(404).json({ error: 'Task not found' });
     const [removed] = tasks.splice(idx, 1);
     res.status(200).json(removed);
+});
+
+app.use((req, res) => {
+    res.status(404).json({ error: 'Route not found' });
+});
+
+app.use((err, req, res, next) => {
+    if (err.type === 'entity.parse.failed') {
+        return res.status(400).json({ error: 'Invalid JSON payload' });
+    }
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
 });
 
 app.listen(port, (err) => {
