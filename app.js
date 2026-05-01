@@ -5,11 +5,17 @@ const port = 3000;
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-let tasks = require('./task.json').tasks;
+const PRIORITIES = ['low', 'medium', 'high'];
+
+let tasks = require('./task.json').tasks.map((t, i) => ({
+    ...t,
+    priority: t.priority ?? 'medium',
+    createdAt: t.createdAt ?? new Date(Date.now() + i).toISOString(),
+}));
 
 const validateTaskBody = (body) => {
     if (!body || typeof body !== 'object') return 'Request body is required';
-    const { title, description, completed } = body;
+    const { title, description, completed, priority } = body;
     if (typeof title !== 'string' || title.trim() === '') {
         return 'title must be a non-empty string';
     }
@@ -18,6 +24,9 @@ const validateTaskBody = (body) => {
     }
     if (typeof completed !== 'boolean') {
         return 'completed must be a boolean';
+    }
+    if (priority !== undefined && !PRIORITIES.includes(priority)) {
+        return `priority must be one of: ${PRIORITIES.join(', ')}`;
     }
     return null;
 };
@@ -28,7 +37,31 @@ const parseId = (raw) => {
 };
 
 app.get('/tasks', (req, res) => {
-    res.status(200).json(tasks);
+    let result = [...tasks];
+
+    if (req.query.completed !== undefined) {
+        if (req.query.completed === 'true') {
+            result = result.filter((t) => t.completed === true);
+        } else if (req.query.completed === 'false') {
+            result = result.filter((t) => t.completed === false);
+        } else {
+            return res.status(400).json({ error: 'completed must be true or false' });
+        }
+    }
+
+    const order = req.query.order === 'desc' ? -1 : 1;
+    result.sort((a, b) => order * (new Date(a.createdAt) - new Date(b.createdAt)));
+
+    res.status(200).json(result);
+});
+
+app.get('/tasks/priority/:level', (req, res) => {
+    const level = req.params.level;
+    if (!PRIORITIES.includes(level)) {
+        return res.status(400).json({ error: `priority must be one of: ${PRIORITIES.join(', ')}` });
+    }
+    const result = tasks.filter((t) => t.priority === level);
+    res.status(200).json(result);
 });
 
 app.get('/tasks/:id', (req, res) => {
@@ -50,6 +83,8 @@ app.post('/tasks', (req, res) => {
         title: req.body.title.trim(),
         description: req.body.description.trim(),
         completed: req.body.completed,
+        priority: req.body.priority ?? 'medium',
+        createdAt: new Date().toISOString(),
     };
     tasks.push(newTask);
     res.status(201).json(newTask);
@@ -71,6 +106,8 @@ app.put('/tasks/:id', (req, res) => {
         title: req.body.title.trim(),
         description: req.body.description.trim(),
         completed: req.body.completed,
+        priority: req.body.priority ?? tasks[idx].priority,
+        createdAt: tasks[idx].createdAt,
     };
     res.status(200).json(tasks[idx]);
 });
